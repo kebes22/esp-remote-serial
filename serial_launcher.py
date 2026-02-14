@@ -56,20 +56,20 @@ def ensure_dependencies() -> list[str]:
 class SerialPortPicker(tk.Tk):
     """Main application window."""
 
-    MIN_WIDTH = 500
+    WIDTH = 700
     HEIGHT = 380
     DEFAULT_TCP_PORT = 2217
 
     def __init__(self):
         super().__init__()
         self.title("ESP Remote Serial Port Service")
-        self.resizable(False, False)
-        self._width = self.MIN_WIDTH
+        self.minsize(self.WIDTH, self.HEIGHT)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._selected_port: str | None = None
         self._process: subprocess.Popen | None = None
         self._build_ui()
+        self._center_window()
         self._refresh_ports()
 
     # ── UI construction ──────────────────────────────────────────────
@@ -97,13 +97,12 @@ class SerialPortPicker(tk.Tk):
             row=1, column=1, sticky="e"
         )
 
-        # Row 2 – TCP port
-        ttk.Label(frame, text="TCP port:").grid(
-            row=2, column=0, sticky="w", pady=(12, 0)
-        )
+        # Row 2 – TCP port (label + entry grouped to match Refresh button)
+        tcp_frame = ttk.Frame(frame)
+        tcp_frame.grid(row=2, column=1, sticky="e", pady=(12, 0))
+        ttk.Label(tcp_frame, text="TCP port:").pack(side="left", padx=(0, 4))
         self._tcp_port_var = tk.StringVar(value=str(self.DEFAULT_TCP_PORT))
-        tcp_entry = ttk.Entry(frame, textvariable=self._tcp_port_var, width=8)
-        tcp_entry.grid(row=2, column=1, sticky="e", pady=(12, 0))
+        ttk.Entry(tcp_frame, textvariable=self._tcp_port_var, width=8).pack(side="left")
 
         # Row 3 – launch / stop buttons
         btn_frame = ttk.Frame(frame)
@@ -121,7 +120,7 @@ class SerialPortPicker(tk.Tk):
 
         # Row 4 – log output
         self._log = scrolledtext.ScrolledText(
-            frame, height=10, state="disabled", wrap="word",
+            frame, height=10, width=80, state="disabled", wrap="word",
             font=("Consolas", 9), bg="#1e1e1e", fg="#cccccc",
             insertbackground="#cccccc", selectbackground="#264f78",
         )
@@ -134,9 +133,9 @@ class SerialPortPicker(tk.Tk):
 
     def _center_window(self):
         self.update_idletasks()
-        x = (self.winfo_screenwidth() - self._width) // 2
+        x = (self.winfo_screenwidth() - self.WIDTH) // 2
         y = (self.winfo_screenheight() - self.HEIGHT) // 2
-        self.geometry(f"{self._width}x{self.HEIGHT}+{x}+{y}")
+        self.geometry(f"{self.WIDTH}x{self.HEIGHT}+{x}+{y}")
 
     def _refresh_ports(self):
         """Re-scan serial ports and populate the dropdown."""
@@ -152,12 +151,8 @@ class SerialPortPicker(tk.Tk):
 
         if labels:
             self._combo.current(0)
-            longest = max(len(l) for l in labels)
-            self._combo.configure(width=longest + 2)
-            self._width = max(self.MIN_WIDTH, longest * 8 + 120)
         else:
             self._port_var.set("No serial ports detected.")
-        self._center_window()
 
     def _log_append(self, text: str):
         """Append text to the log widget (thread-safe via after)."""
