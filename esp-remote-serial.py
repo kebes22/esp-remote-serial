@@ -1,5 +1,5 @@
 """
-esp_rfc2217_server Launcher – cross-platform GUI (Windows / macOS / Linux).
+esp_rfc2217_server Service – cross-platform GUI (Windows / macOS / Linux).
 
 Presents a dropdown of available serial ports, a configurable TCP port,
 and launches esp_rfc2217_server as a child process.
