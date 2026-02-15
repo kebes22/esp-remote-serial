@@ -6,6 +6,8 @@ and launches esp_rfc2217_server as a child process.
 """
 
 import importlib
+import os
+import platform
 import subprocess
 import sys
 import threading
@@ -230,7 +232,63 @@ class SerialPortPicker(tk.Tk):
         return self._selected_port
 
 
+def launch_detached() -> int:
+    """Re-launch this script as a detached background process."""
+    system = platform.system()
+    script_path = os.path.abspath(__file__)
+    
+    # Add environment variable to mark the detached process
+    env = os.environ.copy()
+    env["ESP_SERIAL_BRIDGE_DETACHED"] = "1"
+    
+    if system == "Windows":
+        # Use pythonw to avoid console window
+        pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+        if not os.path.exists(pythonw):
+            pythonw = "pythonw"  # Fallback to PATH lookup
+        
+        # Launch detached process without console
+        subprocess.Popen(
+            [pythonw, script_path],
+            env=env,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+    elif system == "Darwin":  # macOS
+        # Use 'open' to launch as GUI app
+        subprocess.Popen(
+            ["open", "-a", "Python", script_path],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:  # Linux
+        # Launch as detached background process
+        subprocess.Popen(
+            [sys.executable, script_path],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    
+    print(f"Launched ESP Remote Serial GUI on {system}")
+    return 0
+
+
 def main() -> int:
+    # Check if we're already the detached child process
+    if os.environ.get("ESP_SERIAL_BRIDGE_DETACHED") == "1":
+        # This is the actual GUI process - run normally
+        errors = ensure_dependencies()
+    else:
+        # This is the initial call - detach and exit
+        return launch_detached()
+    
+    # Normal GUI launch (only reached by detached child)
     errors = ensure_dependencies()
     if errors:
         root = tk.Tk()
