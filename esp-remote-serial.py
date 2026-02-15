@@ -64,7 +64,7 @@ class SerialPortPicker(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("ESP Remote Serial Port Service")
+        self.title("ESP32 Remote Serial Port Service")
         self.minsize(self.WIDTH, self.HEIGHT)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -275,7 +275,7 @@ def launch_detached() -> int:
             start_new_session=True,
         )
     
-    print(f"Launched ESP Remote Serial GUI on {system}")
+    print(f"Launched ESP32 Remote Serial GUI on {system}")
     return 0
 
 
