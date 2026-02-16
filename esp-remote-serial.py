@@ -257,12 +257,14 @@ def launch_detached() -> int:
             stdin=subprocess.DEVNULL,
         )
     elif system == "Darwin":  # macOS
-        # Use 'open' to launch as GUI app
+        # Launch as detached background process (same approach as Linux)
         subprocess.Popen(
-            ["open", "-a", "Python", script_path],
+            [sys.executable, script_path],
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
         )
     else:  # Linux
         # Launch as detached background process
