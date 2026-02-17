@@ -179,10 +179,17 @@ class SerialPortPicker(tk.Tk):
         # Row 2 – TCP port (label + entry grouped to match Refresh button)
         tcp_frame = ttk.Frame(frame)
         tcp_frame.grid(row=2, column=1, sticky="e", pady=(12, 0))
-        ttk.Label(tcp_frame, text="TCP port:").pack(side="left", padx=(0, 4))
+        
+        # Show "(Locked)" in label if TCP port was specified via command-line
+        tcp_label_text = "TCP Port (Locked):" if self._initial_tcp_port else "TCP Port:"
+        ttk.Label(tcp_frame, text=tcp_label_text).pack(side="left", padx=(0, 4))
+        
         tcp_value = str(self._initial_tcp_port) if self._initial_tcp_port else str(self.DEFAULT_TCP_PORT)
         self._tcp_port_var = tk.StringVar(value=tcp_value)
-        ttk.Entry(tcp_frame, textvariable=self._tcp_port_var, width=8).pack(side="left")
+        
+        # Make entry read-only if TCP port is locked
+        tcp_state = "readonly" if self._initial_tcp_port else "normal"
+        ttk.Entry(tcp_frame, textvariable=self._tcp_port_var, width=8, state=tcp_state).pack(side="left")
 
         # Row 3 – launch / stop buttons
         btn_frame = ttk.Frame(frame)
