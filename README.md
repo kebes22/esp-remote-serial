@@ -26,10 +26,12 @@ A cross-platform GUI application that launches an `esp_rfc2217_server` instance,
 
 ## Usage
 
+### Basic Usage
+
 Run the service:
 
 ```bash
-python esp-remote-serial.py
+python3 esp-remote-serial.py
 ```
 
 The script automatically launches the GUI as a **detached background process**, allowing the terminal command to return immediately without blocking. This is particularly useful when launching from build systems or container initialization scripts.
@@ -40,6 +42,39 @@ The script automatically launches the GUI as a **detached background process**, 
 4. Click **Stop** to terminate the server.
 
 The log panel at the bottom displays real-time output from the server process.
+
+### Command-Line Arguments
+
+You can pre-populate the GUI fields and enable duplicate-launch protection using command-line arguments:
+
+```bash
+python3 esp-remote-serial.py --serial-port COM3 --tcp-port 2217
+```
+
+**Available arguments:**
+
+- `--serial-port` / `-s` - Pre-selects the specified serial port in the dropdown (e.g., `COM3`, `/dev/ttyUSB0`)
+- `--tcp-port` / `-t` - Pre-fills the TCP port field and enables lock protection for that port
+
+**Lock Behavior:**
+
+When `--tcp-port` is specified, the script creates a lock file (`.esp-serial-tcp{port}.lock`) to prevent duplicate instances from being launched for the same TCP port. This is useful for automated launches (e.g., from dev container initialization) to avoid creating multiple instances.
+
+- **With `--tcp-port`**: Checks for existing instance on that TCP port, skips launch if already running
+- **Without `--tcp-port`**: Always launches a new instance (no lock protection)
+
+**Examples:**
+
+```bash
+# Protected launch - won't create duplicate for TCP port 2217
+python3 esp-remote-serial.py --tcp-port 2217
+
+# Pre-populate both fields with lock protection
+python3 esp-remote-serial.py --serial-port COM3 --tcp-port 2217
+
+# Unprotected launch - always creates new instance
+python3 esp-remote-serial.py
+```
 
 ## Using from a VS Code Docker Dev Container
 
@@ -74,7 +109,21 @@ With this configuration, the ESP-IDF extension (and any `esptool` / `idf.py` com
 
 You can also configure your dev container to automatically launch the serial bridge on the host when the container starts. This eliminates the need to manually run the script each time.
 
-1. **Copy the script to a tools directory in your project (or any other location you choose):**
+1. **Add the script to your project:**
+
+   You can either copy the script files or add this repository as a git submodule:
+
+   **Option A: Copy the files**
+   ```bash
+   mkdir -p tools
+   cp -r /path/to/esp-remote-serial tools/
+   ```
+
+   **Option B: Add as a git submodule**
+   ```bash
+   git submodule add <repo-url> tools/esp-remote-serial
+   git submodule update --init --recursive
+   ```
 
 2. **Update your `.devcontainer/devcontainer.json`:**
 
@@ -84,12 +133,14 @@ You can also configure your dev container to automatically launch the serial bri
    {
      "name": "Your Dev Container",
      "image": "your-image:latest",
-     "initializeCommand": "python tools/esp-remote-serial.py",
+     "initializeCommand": "python3 tools/esp-remote-serial/esp-remote-serial.py --tcp-port 2217",
      // ... other settings
    }
    ```
 
 The `initializeCommand` runs **on the host machine** when the container is started, making it perfect for launching host-side services. Because the script launches as a detached background process, it won't block the container initialization process.
+
+**Using `--tcp-port` in the `initializeCommand`** is recommended as it prevents duplicate instances from being created if you rebuild or restart the container multiple times. The lock mechanism ensures only one instance runs for each TCP port, while still allowing you to manually launch additional instances on different ports if needed.
 
 ## Accessing from Another Computer on Your Network
 

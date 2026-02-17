@@ -5,6 +5,7 @@ Presents a dropdown of available serial ports, a configurable TCP port,
 and launches esp_rfc2217_server as a child process.
 """
 
+import argparse
 import importlib
 import os
 import platform
@@ -18,7 +19,76 @@ REQUIRED_PACKAGES = {
     # import_name -> pip_name
     "serial": "pyserial",
     "esptool": "esptool",
+    "psutil": "psutil",
 }
+
+
+def get_lock_file_path(tcp_port: int) -> str:
+    """Get the lock file path for a specific TCP port."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, f".esp-serial-tcp{tcp_port}.lock")
+
+
+def is_process_running(pid: int) -> bool:
+    """Check if a process with given PID is running."""
+    try:
+        import psutil
+        return psutil.pid_exists(pid)
+    except ImportError:
+        # Fallback if psutil not available yet
+        return False
+
+
+def check_existing_instance(tcp_port: int) -> bool:
+    """Check if an instance is already running for this TCP port. Returns True if found."""
+    lock_file = get_lock_file_path(tcp_port)
+    
+    if not os.path.exists(lock_file):
+        return False
+    
+    try:
+        with open(lock_file, 'r') as f:
+            pid_str = f.read().strip()
+            if not pid_str:
+                return False
+            
+            pid = int(pid_str)
+            if is_process_running(pid):
+                print(f"ESP32 Remote Serial GUI already running for TCP port {tcp_port} (PID: {pid})")
+                return True
+            else:
+                # Stale lock file - remove it
+                os.remove(lock_file)
+                return False
+    except (ValueError, OSError):
+        # Invalid or inaccessible lock file - remove it
+        try:
+            os.remove(lock_file)
+        except OSError:
+            pass
+        return False
+
+
+def write_lock_file(tcp_port: int):
+    """Write the current process PID to the lock file for a specific TCP port."""
+    lock_file = get_lock_file_path(tcp_port)
+    try:
+        with open(lock_file, 'w') as f:
+            f.write(str(os.getpid()))
+    except OSError:
+        pass  # Non-critical if we can't write the lock
+
+
+def cleanup_lock_file(tcp_port: int | None):
+    """Remove the lock file for a specific TCP port."""
+    if tcp_port is None:
+        return
+    lock_file = get_lock_file_path(tcp_port)
+    try:
+        if os.path.exists(lock_file):
+            os.remove(lock_file)
+    except OSError:
+        pass
 
 
 def ensure_dependencies() -> list[str]:
@@ -62,7 +132,7 @@ class SerialPortPicker(tk.Tk):
     HEIGHT = 380
     DEFAULT_TCP_PORT = 2217
 
-    def __init__(self):
+    def __init__(self, initial_serial_port: str | None = None, initial_tcp_port: int | None = None):
         super().__init__()
         self.title("ESP32 Remote Serial Port Service")
         self.minsize(self.WIDTH, self.HEIGHT)
@@ -70,9 +140,16 @@ class SerialPortPicker(tk.Tk):
 
         self._selected_port: str | None = None
         self._process: subprocess.Popen | None = None
+        self._initial_serial_port = initial_serial_port
+        self._initial_tcp_port = initial_tcp_port
+        self._locked_tcp_port: int | None = initial_tcp_port
         self._build_ui()
         self._center_window()
         self._refresh_ports()
+        
+        # Write lock file if we have a specific TCP port to protect
+        if self._locked_tcp_port:
+            write_lock_file(self._locked_tcp_port)
 
     # ── UI construction ──────────────────────────────────────────────
 
@@ -103,7 +180,8 @@ class SerialPortPicker(tk.Tk):
         tcp_frame = ttk.Frame(frame)
         tcp_frame.grid(row=2, column=1, sticky="e", pady=(12, 0))
         ttk.Label(tcp_frame, text="TCP port:").pack(side="left", padx=(0, 4))
-        self._tcp_port_var = tk.StringVar(value=str(self.DEFAULT_TCP_PORT))
+        tcp_value = str(self._initial_tcp_port) if self._initial_tcp_port else str(self.DEFAULT_TCP_PORT)
+        self._tcp_port_var = tk.StringVar(value=tcp_value)
         ttk.Entry(tcp_frame, textvariable=self._tcp_port_var, width=8).pack(side="left")
 
         # Row 3 – launch / stop buttons
@@ -151,10 +229,20 @@ class SerialPortPicker(tk.Tk):
         ]
         self._combo["values"] = labels
 
-        if labels:
-            self._combo.current(0)
-        else:
-            self._port_var.set("No serial ports detected.")
+        # Try to pre-select the initial port if specified
+        selected = False
+        if self._initial_serial_port and labels:
+            for idx, port in enumerate(self._ports):
+                if port.device == self._initial_serial_port:
+                    self._combo.current(idx)
+                    selected = True
+                    break
+        
+        if not selected:
+            if labels:
+                self._combo.current(0)
+            else:
+                self._port_var.set("No serial ports detected.")
 
     def _log_append(self, text: str):
         """Append text to the log widget (thread-safe via after)."""
@@ -225,6 +313,7 @@ class SerialPortPicker(tk.Tk):
     def _on_close(self):
         if self._process:
             self._process.terminate()
+        cleanup_lock_file(self._locked_tcp_port)
         self.destroy()
 
     @property
@@ -232,10 +321,17 @@ class SerialPortPicker(tk.Tk):
         return self._selected_port
 
 
-def launch_detached() -> int:
+def launch_detached(serial_port: str | None = None, tcp_port: int | None = None) -> int:
     """Re-launch this script as a detached background process."""
     system = platform.system()
     script_path = os.path.abspath(__file__)
+    
+    # Build command with optional port arguments
+    cmd = [script_path]
+    if serial_port:
+        cmd.extend(["--serial-port", serial_port])
+    if tcp_port:
+        cmd.extend(["--tcp-port", str(tcp_port)])
     
     # Add environment variable to mark the detached process
     env = os.environ.copy()
@@ -249,7 +345,7 @@ def launch_detached() -> int:
         
         # Launch detached process without console
         subprocess.Popen(
-            [pythonw, script_path],
+            [pythonw] + cmd,
             env=env,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
             stdout=subprocess.DEVNULL,
@@ -259,7 +355,7 @@ def launch_detached() -> int:
     elif system == "Darwin":  # macOS
         # Launch as detached background process (same approach as Linux)
         subprocess.Popen(
-            [sys.executable, script_path],
+            [sys.executable] + cmd,
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -269,7 +365,7 @@ def launch_detached() -> int:
     else:  # Linux
         # Launch as detached background process
         subprocess.Popen(
-            [sys.executable, script_path],
+            [sys.executable] + cmd,
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -277,18 +373,46 @@ def launch_detached() -> int:
             start_new_session=True,
         )
     
-    print(f"Launched ESP32 Remote Serial GUI on {system}")
+    port_parts = []
+    if serial_port:
+        port_parts.append(f"serial={serial_port}")
+    if tcp_port:
+        port_parts.append(f"TCP={tcp_port}")
+    port_msg = f" ({', '.join(port_parts)})" if port_parts else ""
+    print(f"Launched ESP32 Remote Serial GUI on {system}{port_msg}")
     return 0
 
 
 def main() -> int:
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="ESP32 Remote Serial Port Service - RFC2217 bridge GUI"
+    )
+    parser.add_argument(
+        "--serial-port", "-s",
+        type=str,
+        default=None,
+        help="Serial port to use (e.g., COM3, /dev/ttyUSB0). Pre-populates the serial port dropdown."
+    )
+    parser.add_argument(
+        "--tcp-port", "-t",
+        type=int,
+        default=None,
+        help="TCP port to use (e.g., 2217). When specified, prevents duplicate launches for this TCP port."
+    )
+    args = parser.parse_args()
+    
     # Check if we're already the detached child process
     if os.environ.get("ESP_SERIAL_BRIDGE_DETACHED") == "1":
         # This is the actual GUI process - run normally
-        errors = ensure_dependencies()
+        pass
     else:
-        # This is the initial call - detach and exit
-        return launch_detached()
+        # This is the initial call - check for existing instance if TCP port is specified
+        if args.tcp_port and check_existing_instance(args.tcp_port):
+            # Instance already running for this TCP port - skip launching
+            return 0
+        # No existing instance (or no TCP port specified) - detach and launch
+        return launch_detached(args.serial_port, args.tcp_port)
     
     # Normal GUI launch (only reached by detached child)
     errors = ensure_dependencies()
@@ -303,7 +427,7 @@ def main() -> int:
     global serial  # noqa: PLW0603
     import serial.tools.list_ports  # noqa: E402
 
-    app = SerialPortPicker()
+    app = SerialPortPicker(initial_serial_port=args.serial_port, initial_tcp_port=args.tcp_port)
     app.mainloop()
     return 0
 
